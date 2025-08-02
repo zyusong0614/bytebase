@@ -19,7 +19,8 @@ func EngineSupportSQLReview(engine storepb.Engine) bool {
 		storepb.Engine_SNOWFLAKE,
 		storepb.Engine_DM,
 		storepb.Engine_REDSHIFT,
-		storepb.Engine_MSSQL:
+		storepb.Engine_MSSQL,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,
@@ -57,7 +58,8 @@ func EngineSupportQueryNewACL(engine storepb.Engine) bool {
 		storepb.Engine_TIDB,
 		storepb.Engine_SNOWFLAKE,
 		storepb.Engine_SPANNER,
-		storepb.Engine_BIGQUERY:
+		storepb.Engine_BIGQUERY,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,
@@ -101,7 +103,8 @@ func EngineSupportMasking(e storepb.Engine) bool {
 		storepb.Engine_BIGQUERY,
 		storepb.Engine_SPANNER,
 		storepb.Engine_REDSHIFT,
-		storepb.Engine_TRINO:
+		storepb.Engine_TRINO,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,
@@ -149,7 +152,8 @@ func EngineSupportAutoComplete(e storepb.Engine) bool {
 		storepb.Engine_OCEANBASE_ORACLE,
 		storepb.Engine_SNOWFLAKE,
 		storepb.Engine_DYNAMODB,
-		storepb.Engine_TRINO:
+		storepb.Engine_TRINO,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,
@@ -311,7 +315,8 @@ func EngineSupportCreateDatabase(e storepb.Engine) bool {
 		storepb.Engine_RISINGWAVE,
 		storepb.Engine_HIVE,
 		storepb.Engine_COCKROACHDB,
-		storepb.Engine_DORIS:
+		storepb.Engine_DORIS,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,
@@ -389,7 +394,8 @@ func EngineSupportSyntaxCheck(e storepb.Engine) bool {
 		storepb.Engine_SNOWFLAKE,
 		storepb.Engine_MSSQL,
 		storepb.Engine_DYNAMODB,
-		storepb.Engine_COCKROACHDB:
+		storepb.Engine_COCKROACHDB,
+		storepb.Engine_INFORMIX:
 		return true
 	case
 		storepb.Engine_ENGINE_UNSPECIFIED,

@@ -60,6 +60,8 @@ export const defaultPortForEngine = (engine: OldEngine) => {
       return "9042";
     case OldEngine.TRINO:
       return "8080";
+    case OldEngine.INFORMIX:
+      return "9088";
   }
   throw new Error("engine port unknown");
 };
@@ -119,6 +121,7 @@ export const EngineIconPath: Record<string, string> = {
   [OldEngine.CASSANDRA]: new URL("@/assets/db/cassandra.svg", import.meta.url)
     .href,
   [OldEngine.TRINO]: new URL("@/assets/db/trino.svg", import.meta.url).href,
+  [OldEngine.INFORMIX]: new URL("@/assets/db/informix.png", import.meta.url).href,
 };
 
 export const MongoDBConnectionStringSchemaList = [

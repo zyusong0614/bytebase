@@ -100,6 +100,7 @@ export const supportedEngineV1List = () => {
     Engine.COSMOSDB,
     Engine.CASSANDRA,
     Engine.TRINO,
+    Engine.INFORMIX,
   ];
   if (locale.value === "zh-CN") {
     engines.push(Engine.DM);
@@ -140,6 +141,7 @@ export const enginesSupportCreateDatabase = () => {
     Engine.HIVE,
     Engine.COCKROACHDB,
     Engine.DORIS,
+    Engine.INFORMIX,
   ];
 };
 
@@ -179,6 +181,7 @@ export const instanceV1HasSSL = (
     Engine.ELASTICSEARCH,
     Engine.MSSQL,
     Engine.CASSANDRA,
+    Engine.INFORMIX,
   ].includes(engine);
 };
 
@@ -208,6 +211,7 @@ export const instanceV1HasExtraParameters = (
     Engine.ORACLE,
     Engine.MSSQL,
     Engine.MONGODB,
+    Engine.INFORMIX,
   ].includes(engine);
 };
 
@@ -394,6 +398,8 @@ export const engineNameV1 = (type: Engine): string => {
       return "Cassandra";
     case Engine.TRINO:
       return "Trino";
+    case Engine.INFORMIX:
+      return "Informix";
   }
   return "";
 };
@@ -472,6 +478,7 @@ export const supportGetStringSchema = (engine: Engine) => {
     Engine.REDSHIFT,
     Engine.ORACLE,
     Engine.MSSQL,
+    Engine.INFORMIX,
   ].includes(engine);
 };
 
