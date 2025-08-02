@@ -7,7 +7,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/bytebase/bytebase/backend/common/log"
 	storepb "github.com/bytebase/bytebase/backend/generated-go/store"
 	"github.com/bytebase/bytebase/backend/plugin/db"
 )
@@ -98,11 +97,12 @@ func (d *Driver) SyncDBSchema(ctx context.Context) (*storepb.DatabaseSchemaMetad
 // syncTables syncs table metadata (placeholder for future implementation)
 func (d *Driver) syncTables(ctx context.Context, schemaName string) ([]*storepb.TableMetadata, error) {
 	// This would query systables and syscolumns to build table metadata
-	// Example implementation structure:
-	
+	// For now, return empty slice as we don't have real database connection
 	var tables []*storepb.TableMetadata
 	
-	// Query to get all user tables
+	// TODO: Implement when we have actual IBM SDK integration
+	// Example implementation structure:
+	/*
 	query := `
 		SELECT tabname, tabtype 
 		FROM systables 
@@ -141,6 +141,7 @@ func (d *Driver) syncTables(ctx context.Context, schemaName string) ([]*storepb.
 	if err := rows.Err(); err != nil {
 		return nil, errors.Wrapf(err, "failed to iterate table rows")
 	}
+	*/
 
 	return tables, nil
 }
@@ -149,7 +150,9 @@ func (d *Driver) syncTables(ctx context.Context, schemaName string) ([]*storepb.
 func (d *Driver) syncTableColumns(ctx context.Context, tableName string) ([]*storepb.ColumnMetadata, error) {
 	var columns []*storepb.ColumnMetadata
 
-	// Query to get column information
+	// TODO: Implement when we have actual IBM SDK integration
+	// For now, return empty slice as we don't have real database connection
+	/*
 	query := `
 		SELECT c.colname, c.coltype, c.collength, c.colno
 		FROM syscolumns c, systables t
@@ -195,6 +198,7 @@ func (d *Driver) syncTableColumns(ctx context.Context, tableName string) ([]*sto
 	if err := rows.Err(); err != nil {
 		return nil, errors.Wrapf(err, "failed to iterate column rows")
 	}
+	*/
 
 	return columns, nil
 }
@@ -256,7 +260,9 @@ func convertInformixType(colType int) string {
 func (d *Driver) syncViews(ctx context.Context, schemaName string) ([]*storepb.ViewMetadata, error) {
 	var views []*storepb.ViewMetadata
 
-	// Query to get all views
+	// TODO: Implement when we have actual IBM SDK integration
+	// For now, return empty slice as we don't have real database connection
+	/*
 	query := `
 		SELECT tabname 
 		FROM systables 
@@ -288,6 +294,7 @@ func (d *Driver) syncViews(ctx context.Context, schemaName string) ([]*storepb.V
 	if err := rows.Err(); err != nil {
 		return nil, errors.Wrapf(err, "failed to iterate view rows")
 	}
+	*/
 
 	return views, nil
 }

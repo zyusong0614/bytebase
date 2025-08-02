@@ -1,0 +1,50 @@
+# Informix ODBC测试环境 - Ubuntu 20.04 x86_64
+FROM --platform=linux/amd64 ubuntu:20.04
+
+# 避免交互式安装提示
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装基础工具
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    unzip \
+    build-essential \
+    unixodbc \
+    unixodbc-dev \
+    odbcinst \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装Go 1.21
+RUN wget https://go.dev/dl/go1.21.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz && \
+    rm go1.21.0.linux-amd64.tar.gz
+
+# 设置Go环境变量
+ENV PATH=/usr/local/go/bin:$PATH
+ENV GOPATH=/go
+ENV GOPROXY=https://proxy.golang.org,direct
+
+# 创建工作目录
+WORKDIR /app
+
+# 设置Informix环境变量
+ENV INFORMIXDIR=/opt/IBM/informix
+ENV INFORMIXSERVER=informix_tcp
+ENV INFORMIXSQLHOSTS=$INFORMIXDIR/etc/sqlhosts
+ENV PATH=$INFORMIXDIR/bin:$PATH
+ENV LD_LIBRARY_PATH=$INFORMIXDIR/lib:$INFORMIXDIR/lib/esql:$LD_LIBRARY_PATH
+ENV CLIENT_LOCALE=en_US.utf8
+ENV DB_LOCALE=en_US.utf8
+
+# 创建Informix目录
+RUN mkdir -p $INFORMIXDIR/etc $INFORMIXDIR/lib/cli
+
+# 复制测试代码
+COPY . /app/
+
+# 初始化Go模块
+RUN go mod init informix-odbc-test
+
+CMD ["/bin/bash"]
