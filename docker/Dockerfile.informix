@@ -1,0 +1,111 @@
+# Bytebase with Informix ODBC Support
+# Multi-stage build for optimal image size
+
+# Stage 1: Frontend build
+FROM node:20-alpine AS frontend
+WORKDIR /frontend
+
+# Copy frontend files
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+RUN pnpm build
+
+# Stage 2: Backend build
+FROM golang:1.21-bookworm AS backend
+WORKDIR /backend
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    git \
+    unixodbc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Copy frontend build
+COPY --from=frontend /frontend/dist ./frontend/dist
+
+# Build backend with Informix tag
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+    go build -tags informix -ldflags "-w -s" -o ./bytebase-build/bytebase ./backend/bin/server/main.go
+
+# Stage 3: Runtime image
+FROM ubuntu:20.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    unixodbc \
+    odbcinst \
+    openjdk-11-jre \
+    libncurses5 \
+    libtinfo5 \
+    postgresql-client \
+    mysql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create bytebase user
+RUN useradd -m -s /bin/bash bytebase
+
+# Set up Informix environment
+ENV INFORMIXDIR=/opt/IBM/informix
+ENV INFORMIXSERVER=informix_tcp
+ENV INFORMIXSQLHOSTS=$INFORMIXDIR/etc/sqlhosts
+ENV PATH=$INFORMIXDIR/bin:$PATH
+ENV LD_LIBRARY_PATH=$INFORMIXDIR/lib:$INFORMIXDIR/lib/esql:$INFORMIXDIR/lib/cli:$LD_LIBRARY_PATH
+ENV CLIENT_LOCALE=en_US.utf8
+ENV DB_LOCALE=en_US.utf8
+
+# Create Informix directories
+RUN mkdir -p $INFORMIXDIR/etc $INFORMIXDIR/lib/cli
+
+# Copy IBM Informix Client SDK
+COPY backend/plugin/db/informix/Go_ODBC_Informix_Complete_Package/ibm.csdk.4.50.12.Linux.64.x86_64.tar /tmp/
+
+# Install Informix Client SDK
+WORKDIR /tmp
+RUN tar -xf ibm.csdk.4.50.12.Linux.64.x86_64.tar && \
+    cd informix && \
+    echo -e "1\n\n1\ny" | ./installclientsdk && \
+    cd / && \
+    rm -rf /tmp/*
+
+# Configure ODBC
+COPY docker/informix/odbcinst.ini /etc/odbcinst.ini
+COPY docker/informix/odbc.ini /etc/odbc.ini
+
+# Copy Bytebase binary
+COPY --from=backend /backend/bytebase-build/bytebase /usr/local/bin/bytebase
+
+# Create data directory
+RUN mkdir -p /var/opt/bytebase && \
+    chown -R bytebase:bytebase /var/opt/bytebase
+
+# Switch to bytebase user
+USER bytebase
+WORKDIR /var/opt/bytebase
+
+# Expose ports
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/healthz || exit 1
+
+# Start Bytebase
+ENTRYPOINT ["/usr/local/bin/bytebase"]
+CMD ["--data", "/var/opt/bytebase", "--port", "8080"]

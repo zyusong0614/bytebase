@@ -1,0 +1,56 @@
+===============================================================================
+=================  Code Signed Informix products README file  =================
+===============================================================================
+To incorporate secure code signing of IBM Informix releases, the original 
+tar/zip product image has been signed. A new tar/zip file of the same name has
+been created that contains:
+
+  - Original media file with the same name as the file you just extracted.
+  - 3 files to be used to verify the code signature file.
+    - informix.pem.cer - Certificate used to create the keys
+    - informix.pem.chain - Verifies the integrity of the certificate authority
+    - informix.pem.pub.key - Public key for the certificate
+  - This Readme.codesign file
+
+1. Extract the tar/zip image
+
+2. Verify Informix code signature files using openssl, See IBM web site for
+other methods of verification.
+
+  - Verify the certificate:
+    - openssl x509 -in informix.pem.cer -noout -text                          
+
+  - Verify the public key:
+    - openssl rsa -in informix.pem.pub.key -inform PEM -noout -text -pubin
+
+  - Verify the authority chain:
+    - openssl ocsp -no_nonce -issuer informix.pem.chain -cert informix.pem.cer \
+              -VAfile informix.pem.chain -text -url http://ocsp.digicert.com \
+              -respout ocsptest
+
+  - Verify the product signature file using openssl:
+    - openssl dgst -sha256 -verify informix.pem.pub.key -signature <tmpencode.sig> <product tar file>
+
+You can optionally verify the contents of the public key by comparing the 
+contents of the informix.pem.pub.key file with the output below:
+
+-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA5p2iJ/A+hwsUeXrsQ1Xz
+yqlnLmqyhCl6GCrybzW8Vinz5saK1exUQaJMFDWGutWfsd0ArXOg2cyC2o17Ixag
+FevGNRKOZ5hxjDXLpM4l68kct3geudR+IfohTr1MRftHl8cQW44fOvSMmyhhgwPH
+BdIUm9CUSwVQhd33aARgW9Zc90G/M+2gXTZAfPA3YBszRfsqSLQTJCrZi21udjmq
+SBW9tYdI8/ikx8vGhyS8Kl0/r6/gTLEmT9fSywUVIhyXTj/pEGgN9fGK5iDGqNUn
+EncPCOoWDROcYzK67An3NKPp5uAA9wa4EOoOW/9BNPTdHzZ95Q47V5lgT3VvrWDo
+2DGqLbFNxk62IbPYI97XHOmvVzTnMktHxyGdeGJjwvD+AC6vZhQRI+HO7vcQr6Zd
+aODqHD437BKXuL3jBfpIA3YhVC43SMrK5B4LJZAzasOcE0gdeFphFa7ErJEjlK68
+P+zjSqdavS7uvAxf1+H9hvkH/wPd83CqBN4CJHJWsbT4+rxRPb6iozJTTgpio0Fc
+oN93M8JjLio//Tg3CicZBI6/9Neg6jOj9l6yj7ip3oUqeQJDztDGYT8I++KGyZ47
+soo52AdrGyoyx09V+43ACMYNgx3N3VkK0kW8pvNQWLErprE8AZnrczOivC62EWls
+5zy67mvtWPIsEarJz19p3Y0CAwEAAQ==
+-----END PUBLIC KEY-----
+
+NOTE: Even if you do not need the verification, you can still use the 
+package. 
+
+This information is also included on the Informix documentation web site.
+============================ End of README.codesign2 ==========================

@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for Bytebase metadata
+  postgres:
+    image: postgres:15
+    container_name: bytebase-postgres
+    environment:
+      POSTGRES_USER: bbdev
+      POSTGRES_PASSWORD: bbdev
+      POSTGRES_DB: bbdev
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - bytebase-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bbdev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Informix test database
+  informix:
+    image: icr.io/informix/informix-developer-database:latest
+    container_name: informix-test-db
+    platform: linux/amd64
+    ports:
+      - "9088:9088"
+      - "9089:9089"
+    environment:
+      LICENSE: accept
+      STORAGE: local
+    volumes:
+      - informix-data:/opt/ibm/data
+    networks:
+      - bytebase-net
+    healthcheck:
+      test: ["CMD-SHELL", "onstat -"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Bytebase with Informix support
+  bytebase:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.informix
+    container_name: bytebase-informix
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+      - "3000:3000"  # Frontend dev port
+    environment:
+      # Bytebase configuration
+      PG_URL: postgresql://bbdev:bbdev@postgres:5432/bbdev
+      
+      # Informix environment
+      INFORMIXDIR: /opt/IBM/informix
+      INFORMIXSERVER: informix_tcp
+      INFORMIXSQLHOSTS: /opt/IBM/informix/etc/sqlhosts
+      CLIENT_LOCALE: en_US.utf8
+      DB_LOCALE: en_US.utf8
+      
+      # ODBC configuration
+      ODBCINI: /etc/odbc.ini
+      ODBCSYSINI: /etc
+    volumes:
+      - bytebase-data:/var/opt/bytebase
+      - ./docker/informix/sqlhosts:/opt/IBM/informix/etc/sqlhosts:ro
+    networks:
+      - bytebase-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      informix:
+        condition: service_healthy
+    command: ["--data", "/var/opt/bytebase", "--port", "8080", "--debug"]
+
+  # Development container for testing
+  dev-tools:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.informix
+      target: backend
+    container_name: bytebase-dev
+    platform: linux/amd64
+    volumes:
+      - .:/workspace
+      - go-cache:/go/pkg/mod
+    networks:
+      - bytebase-net
+    command: tail -f /dev/null
+    profiles:
+      - dev
+
+networks:
+  bytebase-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  informix-data:
+  bytebase-data:
+  go-cache:

@@ -1,2 +1,11 @@
 frontend/node_modules
 bytebase-build
+._*
+.DS_Store
+**/.DS_Store
+**/._*
+*.log
+test-dockerfile
+Dockerfile.test
+.claude/
+**/.claude/
