@@ -270,7 +270,13 @@ func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.Connectio
 		"host", config.DataSource.Host,
 		"port", port)
 	
-	return driver, nil
+	// Return the base Driver with embedded ODBCDriver
+	d.connectionString = connString
+	d.databaseName = database
+	d.connectionCtx = config.ConnectionContext
+	d.odbcDriver = driver
+	
+	return d, nil
 }
 
 // Close closes the driver
@@ -315,8 +321,12 @@ func (d *ODBCDriver) Execute(ctx context.Context, statement string, opts db.Exec
 	}
 	
 	if opts.CreateDatabase {
-		// Informix CREATE DATABASE syntax
-		statement = fmt.Sprintf("CREATE DATABASE %s", opts.DatabaseName)
+		// For CREATE DATABASE, use the database name from connection context
+		dbName := d.connectionCtx.DatabaseName
+		if dbName == "" {
+			dbName = "testdb" // Default name
+		}
+		statement = fmt.Sprintf("CREATE DATABASE %s", dbName)
 	}
 	
 	cSQL := C.CString(statement)
@@ -359,12 +369,58 @@ func (d *ODBCDriver) QueryConn(ctx context.Context, conn *sql.Conn, statement st
 	result := &v1pb.QueryResult{
 		Statement: statement,
 		// Note: Full result fetching would be implemented here
-		Latency: 0, // Would measure actual latency
+		Latency: nil, // Would measure actual latency as durationpb
 	}
 	
 	slog.Debug("Query executed via ODBC", 
 		"rows", queryResult.rows,
 		"cols", queryResult.cols)
 	
+	return []*v1pb.QueryResult{result}, nil
+}
+
+// Driver methods that delegate to ODBCDriver
+
+// Close closes the driver
+func (d *Driver) Close(ctx context.Context) error {
+	if d.odbcDriver != nil {
+		return d.odbcDriver.Close(ctx)
+	}
+	return nil
+}
+
+// Ping pings the database
+func (d *Driver) Ping(ctx context.Context) error {
+	if d.odbcDriver != nil {
+		return d.odbcDriver.Ping(ctx)
+	}
+	return errors.New("ODBC driver not initialized")
+}
+
+// GetDB returns nil as we're using ODBC, not sql.DB
+func (d *Driver) GetDB() *sql.DB {
+	if d.odbcDriver != nil {
+		return d.odbcDriver.GetDB()
+	}
+	return nil
+}
+
+// Execute executes a SQL statement
+func (d *Driver) Execute(ctx context.Context, statement string, opts db.ExecuteOptions) (int64, error) {
+	if d.odbcDriver != nil {
+		return d.odbcDriver.Execute(ctx, statement, opts)
+	}
+	return 0, errors.New("ODBC driver not initialized")
+}
+
+// QueryConn queries a SQL statement
+func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string, queryContext db.QueryContext) ([]*v1pb.QueryResult, error) {
+	if d.odbcDriver != nil {
+		return d.odbcDriver.QueryConn(ctx, conn, statement, queryContext)
+	}
+	result := &v1pb.QueryResult{
+		Statement: statement,
+		Error:     "ODBC driver not initialized",
+	}
 	return []*v1pb.QueryResult{result}, nil
 }

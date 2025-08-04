@@ -20,6 +20,9 @@ type Driver struct {
 	databaseName     string
 	serverName       string
 	connectionCtx    db.ConnectionContext
+	
+	// ODBC-specific fields (only available with informix build tag)
+	odbcDriver *ODBCDriver
 }
 
 func newDriver() db.Driver {
