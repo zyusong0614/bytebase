@@ -313,6 +313,8 @@ func convertToEngine(engine storepb.Engine) v1pb.Engine {
 		return v1pb.Engine_CASSANDRA
 	case storepb.Engine_TRINO:
 		return v1pb.Engine_TRINO
+	case storepb.Engine_INFORMIX:
+		return v1pb.Engine_INFORMIX
 	default:
 	}
 	return v1pb.Engine_ENGINE_UNSPECIFIED
@@ -376,6 +378,8 @@ func convertEngine(engine v1pb.Engine) storepb.Engine {
 		return storepb.Engine_CASSANDRA
 	case v1pb.Engine_TRINO:
 		return storepb.Engine_TRINO
+	case v1pb.Engine_INFORMIX:
+		return storepb.Engine_INFORMIX
 	default:
 	}
 	return storepb.Engine_ENGINE_UNSPECIFIED

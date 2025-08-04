@@ -208,6 +208,10 @@ type ODBCDriver struct {
 
 // Open opens an Informix driver using ODBC
 func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.ConnectionConfig) (db.Driver, error) {
+	if config.DataSource == nil {
+		return nil, errors.Errorf("DataSource is required for Informix connection")
+	}
+	
 	port, err := strconv.Atoi(config.DataSource.Port)
 	if err != nil {
 		return nil, errors.Errorf("invalid port %q", config.DataSource.Port)

@@ -1,4 +1,4 @@
-//go:build informix
+//go:build informix && !ultimate
 
 package server
 
