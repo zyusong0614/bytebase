@@ -343,6 +343,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/openark/golib v0.0.0-20210531070646-355f37940af8
+	github.com/openinformix/ifxgo v0.0.0-20180503180937-851536d13269
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
