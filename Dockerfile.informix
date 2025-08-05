@@ -23,21 +23,14 @@ RUN CGO_ENABLED=1 go build \
 # Runtime stage
 FROM alpine:3.19
 
-# Install runtime dependencies including ODBC
-RUN apk add --no-cache ca-certificates tzdata unixodbc
-
-# Create bytebase user
-RUN addgroup -g 1001 bytebase && \
-    adduser -D -s /bin/sh -u 1001 -G bytebase bytebase
+# Install runtime dependencies including ODBC and Docker CLI
+RUN apk add --no-cache ca-certificates tzdata unixodbc docker-cli
 
 # Copy binary
 COPY --from=build /work/bytebase /usr/local/bin/
 
 # Create data directory
-RUN mkdir -p /var/opt/bytebase && \
-    chown -R bytebase:bytebase /var/opt/bytebase
-
-USER bytebase
+RUN mkdir -p /var/opt/bytebase
 
 EXPOSE 8080
 

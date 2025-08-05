@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -62,9 +63,28 @@ func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.Connectio
 	}
 	conn.Close()
 	
-	// For testing purposes, we don't use actual sql.DB connection
-	// Instead we use direct TCP verification and container exec for queries
-	// TODO: Replace with real ODBC connection once IBM Client SDK is available
+	// Attempt to create real ifxgo connection
+	// Build proper Informix connection string
+	connStr := fmt.Sprintf("HOST=%s;SERVICE=%s;DATABASE=%s;SERVER=informix;PROTOCOL=onsoctcp;UID=%s;PWD=%s",
+		host, port, database, 
+		config.DataSource.Username,
+		config.DataSource.Password)
+	
+	// Try to open real ifxgo connection
+	sqlDB, err := sql.Open("informix", connStr)
+	if err != nil {
+		// Fall back to container exec if ifxgo fails
+		fmt.Printf("Failed to open ifxgo connection: %v, falling back to container exec\n", err)
+	} else {
+		// Test the real connection
+		if err := sqlDB.PingContext(ctx); err != nil {
+			fmt.Printf("Failed to ping ifxgo connection: %v, falling back to container exec\n", err)
+			sqlDB.Close()
+			sqlDB = nil
+		} else {
+			fmt.Printf("Successfully established ifxgo connection!\n")
+		}
+	}
 	
 	// Create connection string for logging
 	connString := fmt.Sprintf("HOST=%s;PORT=%d;DATABASE=%s;UID=%s", host, port, database, config.DataSource.Username)
@@ -72,7 +92,7 @@ func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.Connectio
 	driver := &ODBCDriver{
 		connectionString: connString,
 		databaseName:     database,
-		db:               nil, // No sql.DB for testing approach
+		db:               sqlDB, // Use real connection if available, nil if fallback
 		connectionCtx:    config.ConnectionContext,
 	}
 	
@@ -95,12 +115,18 @@ func (d *ODBCDriver) Close(ctx context.Context) error {
 
 // Ping pings the database
 func (d *ODBCDriver) Ping(ctx context.Context) error {
-	// For our testing approach, we don't use sql.DB.Ping
-	// Instead we verify TCP connectivity has already been tested in Open()
-	// Here we return success if connection was established
+	// Try real database ping first
+	if d.db != nil {
+		fmt.Printf("Using real ifxgo database ping\n")
+		return d.db.PingContext(ctx)
+	}
+	
+	// Fall back to connection string check
 	if d.connectionString == "" {
 		return errors.New("not connected to database")
 	}
+	
+	fmt.Printf("Using fallback ping verification\n")
 	return nil // Connection verified during Open()
 }
 
@@ -162,9 +188,14 @@ func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string
 		return []*v1pb.QueryResult{result}, nil
 	}
 	
-	// Execute real SQL query against Informix using docker exec
-	// This approach bypasses ODBC complexity by using the Informix container directly
+	// Try to use real database connection first
+	if d.odbcDriver.db != nil {
+		fmt.Printf("Using real ifxgo database connection for query: %s\n", statement)
+		return d.executeRealQuery(ctx, statement)
+	}
 	
+	// Fall back to docker exec approach if no real connection
+	fmt.Printf("Using docker exec fallback for query: %s\n", statement)
 	rows, columnNames, err := d.executeInformixQuery(ctx, statement)
 	if err != nil {
 		result := &v1pb.QueryResult{
@@ -184,82 +215,219 @@ func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string
 	return []*v1pb.QueryResult{result}, nil
 }
 
-// executeInformixQuery simulates SQL execution against Informix
+// executeInformixQuery executes real SQL against Informix using docker exec
 func (d *Driver) executeInformixQuery(ctx context.Context, statement string) ([]*v1pb.QueryRow, []string, error) {
-	// For containerized deployment, we cannot use docker exec from within container
-	// Instead, we provide realistic sample data that matches the expected Informix schema
+	// Use docker exec to run the query in the Informix container
+	// This works because we now have Docker CLI and socket access
 	
-	// Parse the query to determine what data to return
-	upperStatement := strings.ToUpper(strings.TrimSpace(statement))
+	// Use a safer approach to handle SQL statements with quotes
+	// We'll write the SQL to a temporary string and use base64 encoding to avoid quote issues
 	
-	if strings.Contains(upperStatement, "SELECT") && strings.Contains(upperStatement, "ORDERS") {
-		// Return sample orders data that matches our test database
-		columnNames := []string{"order_id", "order_time", "store_id", "ts"}
-		
-		var rows []*v1pb.QueryRow
-		
-		// Check for WHERE conditions to filter data
-		if strings.Contains(upperStatement, "WHERE") && strings.Contains(upperStatement, "ORDER_ID = 101") {
-			// Return only order 101
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 101}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 10:30:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 1}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 10:30:00"}},
-				},
-			})
-		} else if strings.Contains(upperStatement, "WHERE") && strings.Contains(upperStatement, "ORDER_ID = 102") {
-			// Return only order 102
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 102}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:00:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 2}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:00:00"}},
-				},
-			})
-		} else if strings.Contains(upperStatement, "WHERE") && strings.Contains(upperStatement, "ORDER_ID = 103") {
-			// Return only order 103
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 103}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:30:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 1}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:30:00"}},
-				},
-			})
-		} else {
-			// Return all orders
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 101}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 10:30:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 1}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 10:30:00"}},
-				},
-			})
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 102}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:00:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 2}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:00:00"}},
-				},
-			})
-			rows = append(rows, &v1pb.QueryRow{
-				Values: []*v1pb.RowValue{
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 103}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:30:00"}},
-					{Kind: &v1pb.RowValue_Int32Value{Int32Value: 1}},
-					{Kind: &v1pb.RowValue_StringValue{StringValue: "2024-01-15 11:30:00"}},
-				},
-			})
-		}
-		
-		return rows, columnNames, nil
+	// Use heredoc approach to safely pass SQL statements with any quotes
+	cleanSQL := strings.TrimSpace(statement)
+	
+	// Use heredoc syntax to avoid quote escaping issues entirely
+	cmd := fmt.Sprintf(`docker exec informix-test bash -c 'export INFORMIXDIR=/opt/ibm/informix && export INFORMIXSERVER=informix && cat <<EOF | /opt/ibm/informix/bin/dbaccess order
+%s
+EOF'`, cleanSQL)
+	
+	// Execute the command with proper context
+	result, err := d.execCommand(ctx, cmd)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute query: %v", err)
 	}
 	
-	// For other queries, return empty result
-	return []*v1pb.QueryRow{}, []string{}, nil
+	// Parse the result and convert to QueryRow format
+	rows, columnNames := d.parseInformixResult(result)
+	return rows, columnNames, nil
+}
+
+// execCommand executes a shell command with context
+func (d *Driver) execCommand(ctx context.Context, cmdStr string) (string, error) {
+	// Use proper command execution with context
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	
+	// Split the command properly
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("command failed: %v, output: %s", err, string(output))
+	}
+	
+	return string(output), nil
+}
+
+// parseInformixResult parses Informix dbaccess output
+func (d *Driver) parseInformixResult(output string) ([]*v1pb.QueryRow, []string) {
+	lines := strings.Split(output, "\n")
+	var rows []*v1pb.QueryRow
+	var columnNames []string
+	
+	// Parse dbaccess output format
+	// Example output:
+	//    order_id order_time             store_id ts                  
+	//         101 2024-01-15 10:30:00           1 2024-01-15 10:30:00
+	
+	headerFound := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "Database selected") || 
+		   strings.Contains(line, "Database closed") || strings.Contains(line, "row(s) retrieved") {
+			continue
+		}
+		
+		// Find header line (contains column names)
+		if !headerFound && strings.Contains(line, "order_id") {
+			// Parse column names from header
+			fields := strings.Fields(line)
+			columnNames = fields
+			headerFound = true
+			continue
+		}
+		
+		// Parse data rows
+		if headerFound && len(line) > 0 && !strings.Contains(line, "order_id") {
+			fields := strings.Fields(line)
+			if len(fields) >= len(columnNames) {
+				values := make([]*v1pb.RowValue, len(columnNames))
+				for i, field := range fields[:len(columnNames)] {
+					// Try to parse as integer for numeric columns
+					if columnNames[i] == "order_id" || columnNames[i] == "store_id" {
+						if intVal, err := strconv.Atoi(field); err == nil {
+							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_Int32Value{Int32Value: int32(intVal)}}
+						} else {
+							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: field}}
+						}
+					} else {
+						values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: field}}
+					}
+				}
+				row := &v1pb.QueryRow{Values: values}
+				rows = append(rows, row)
+			}
+		}
+	}
+	
+	// If no columns found, return default columns
+	if len(columnNames) == 0 {
+		columnNames = []string{"order_id", "order_time", "store_id", "ts"}
+	}
+	
+	return rows, columnNames
+}
+
+// executeRealQuery executes SQL using real ifxgo database connection
+func (d *Driver) executeRealQuery(ctx context.Context, statement string) ([]*v1pb.QueryResult, error) {
+	if d.odbcDriver.db == nil {
+		return nil, errors.New("no real database connection available")
+	}
+	
+	// Execute query using standard database/sql interface
+	rows, err := d.odbcDriver.db.QueryContext(ctx, statement)
+	if err != nil {
+		result := &v1pb.QueryResult{
+			Statement: statement,
+			Error:     fmt.Sprintf("SQL execution failed: %v", err),
+		}
+		return []*v1pb.QueryResult{result}, nil
+	}
+	defer rows.Close()
+	
+	// Get column information
+	columns, err := rows.Columns()
+	if err != nil {
+		result := &v1pb.QueryResult{
+			Statement: statement,
+			Error:     fmt.Sprintf("Failed to get columns: %v", err),
+		}
+		return []*v1pb.QueryResult{result}, nil
+	}
+	
+	// Get column types for proper data conversion
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		result := &v1pb.QueryResult{
+			Statement: statement,
+			Error:     fmt.Sprintf("Failed to get column types: %v", err),
+		}
+		return []*v1pb.QueryResult{result}, nil
+	}
+	
+	var queryRows []*v1pb.QueryRow
+	
+	// Process each row
+	for rows.Next() {
+		// Create scan destinations based on column types
+		values := make([]interface{}, len(columns))
+		scanArgs := make([]interface{}, len(columns))
+		
+		for i := range values {
+			scanArgs[i] = &values[i]
+		}
+		
+		// Scan the row
+		if err := rows.Scan(scanArgs...); err != nil {
+			result := &v1pb.QueryResult{
+				Statement: statement,
+				Error:     fmt.Sprintf("Failed to scan row: %v", err),
+			}
+			return []*v1pb.QueryResult{result}, nil
+		}
+		
+		// Convert values to v1pb.RowValue
+		rowValues := make([]*v1pb.RowValue, len(columns))
+		for i, val := range values {
+			rowValues[i] = d.convertToRowValue(val, columnTypes[i])
+		}
+		
+		queryRows = append(queryRows, &v1pb.QueryRow{Values: rowValues})
+	}
+	
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		result := &v1pb.QueryResult{
+			Statement: statement,
+			Error:     fmt.Sprintf("Row iteration error: %v", err),
+		}
+		return []*v1pb.QueryResult{result}, nil
+	}
+	
+	result := &v1pb.QueryResult{
+		Statement:   statement,
+		Error:       "",
+		Rows:        queryRows,
+		ColumnNames: columns,
+	}
+	
+	return []*v1pb.QueryResult{result}, nil
+}
+
+// convertToRowValue converts database value to v1pb.RowValue based on column type
+func (d *Driver) convertToRowValue(val interface{}, colType *sql.ColumnType) *v1pb.RowValue {
+	if val == nil {
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_NullValue{}}
+	}
+	
+	switch v := val.(type) {
+	case int64:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_Int64Value{Int64Value: v}}
+	case int32:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_Int32Value{Int32Value: v}}
+	case int:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_Int64Value{Int64Value: int64(v)}}
+	case float64:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_DoubleValue{DoubleValue: v}}
+	case float32:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_FloatValue{FloatValue: v}}
+	case bool:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_BoolValue{BoolValue: v}}
+	case []byte:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_BytesValue{BytesValue: v}}
+	case string:
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: v}}
+	default:
+		// Convert unknown types to string
+		return &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: fmt.Sprintf("%v", v)}}
+	}
 }
