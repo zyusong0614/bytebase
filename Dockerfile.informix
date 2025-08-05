@@ -1,0 +1,45 @@
+# Build stage
+FROM golang:1.24-alpine AS build
+
+WORKDIR /work
+
+# Install build dependencies including ODBC
+RUN apk add --no-cache git gcc musl-dev unixodbc-dev
+
+# Copy go module files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build Bytebase with Informix support
+RUN CGO_ENABLED=1 go build \
+    -tags "embed_frontend informix" \
+    -ldflags "-w -s" \
+    -o bytebase \
+    ./backend/bin/server/main.go
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies including ODBC
+RUN apk add --no-cache ca-certificates tzdata unixodbc
+
+# Create bytebase user
+RUN addgroup -g 1001 bytebase && \
+    adduser -D -s /bin/sh -u 1001 -G bytebase bytebase
+
+# Copy binary
+COPY --from=build /work/bytebase /usr/local/bin/
+
+# Create data directory
+RUN mkdir -p /var/opt/bytebase && \
+    chown -R bytebase:bytebase /var/opt/bytebase
+
+USER bytebase
+
+EXPOSE 8080
+
+ENTRYPOINT ["bytebase"]
+CMD ["--data", "/var/opt/bytebase", "--port", "8080"]
