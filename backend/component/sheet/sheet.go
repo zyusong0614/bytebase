@@ -242,6 +242,8 @@ func syntaxCheck(dbType storepb.Engine, statement string) (any, []*storepb.Advic
 		return partiqlSyntaxCheck(statement)
 	case storepb.Engine_COCKROACHDB:
 		return cockroachdbSyntaxCheck(statement)
+	case storepb.Engine(29): // INFORMIX placeholder until protobuf regeneration
+		return informixSyntaxCheck(statement)
 	default:
 		// Return default advice for unsupported database types
 	}
@@ -594,4 +596,24 @@ func tidbSyntaxCheck(statement string) (any, []*storepb.Advice) {
 	}
 
 	return returnNodes, adviceList
+}
+
+func informixSyntaxCheck(statement string) (any, []*storepb.Advice) {
+	// Simple Informix syntax check - accepts basic SQL statements
+	// This is a placeholder implementation for MVP functionality
+	if strings.TrimSpace(statement) == "" {
+		return nil, []*storepb.Advice{
+			{
+				Status:        storepb.Advice_WARNING,
+				Code:          InternalErrorCode,
+				Title:         "Empty statement",
+				Content:       "SQL statement is empty",
+				StartPosition: common.FirstLinePosition,
+			},
+		}
+	}
+	
+	// For now, accept all non-empty statements as valid
+	// In a full implementation, this would use an Informix SQL parser
+	return nil, nil
 }
