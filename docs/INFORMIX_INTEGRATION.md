@@ -11,7 +11,7 @@
 - ✅ **真实数据访问**：通过docker exec执行真实SQL查询
 - ✅ **容器化部署**：完整的Docker Compose部署方案
 - ✅ **混合连接策略**：优先尝试原生连接，失败时降级到docker exec
-- ⚠️ **INSERT功能**：存在SQL引号转义问题，已有解决方案待测试
+- ✅ **INSERT功能**：SQL引号转义问题已解决，heredoc方案验证成功
 - ❌ **真正原生连接**：由于缺少IBM Client SDK，ifxgo驱动无法注册
 
 ### 技术架构
@@ -86,7 +86,7 @@ SELECT order_id, order_time, store_id FROM orders ORDER BY order_id;
 -- 条件查询
 SELECT order_id, order_time, store_id FROM orders WHERE order_id = 101;
 
--- 插入数据（当前有引号转义问题）
+-- 插入数据
 INSERT INTO orders VALUES (104, '2024-01-15 12:00:00', 3, '2024-01-15 12:00:00');
 ```
 
@@ -145,10 +145,10 @@ Dockerfile.informix             # Bytebase + Informix镜像
 
 ### 当前问题
 
-1. **INSERT语句引号转义**
+1. **INSERT语句引号转义** - ✅ **已解决**
    - **问题**: SQL中的单引号导致bash命令解析错误
-   - **状态**: 已实现heredoc解决方案，待测试
-   - **影响**: INSERT、UPDATE、DELETE语句可能失败
+   - **状态**: Heredoc解决方案已实现并验证成功
+   - **结果**: INSERT、UPDATE、DELETE语句正常工作
 
 2. **ifxgo驱动无法注册**
    - **问题**: 缺少IBM Informix Client SDK
@@ -167,10 +167,10 @@ Dockerfile.informix             # Bytebase + Informix镜像
 
 ### 短期计划（1-2周）
 
-- [ ] **修复INSERT功能**
-  - 完成heredoc方案测试
-  - 验证复杂SQL语句支持
-  - 添加更完善的错误处理
+- [x] **修复INSERT功能** - ✅ **完成**
+  - ✅ Heredoc方案已测试并验证成功
+  - ✅ 复杂SQL语句（包含引号）正常工作
+  - ✅ 错误处理机制完善
 
 - [ ] **性能优化**
   - 实现查询结果缓存
