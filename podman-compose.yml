@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for Bytebase metadata storage
+  bytebase-postgres:
+    image: docker.io/library/postgres:14
+    container_name: bytebase-postgres
+    environment:
+      POSTGRES_USER: bbdev
+      POSTGRES_PASSWORD: bbdev
+      POSTGRES_DB: bbdev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bytebase-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bbdev -d bbdev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Informix Database
+  informix-test:
+    image: icr.io/informix/informix-developer-database:latest
+    container_name: informix-test
+    ports:
+      - "9088-9089:9088-9089"
+      - "27017-27018:27017-27018" 
+      - "27883:27883"
+    environment:
+      - LICENSE=accept
+      - DB_INIT=1
+    networks:
+      - bytebase-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10 bash -c '</dev/tcp/localhost/9088'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # Bytebase with Informix support
+  bytebase:
+    image: bytebase-informix:latest
+    container_name: bytebase-informix
+    ports:
+      - "8080:8080"
+    environment:
+      - PG_URL=postgresql://bbdev:bbdev@bytebase-postgres:5432/bbdev
+    networks:
+      - bytebase-net
+    volumes:
+      - bytebase_data:/var/opt/bytebase
+      # Note: Podman socket path is different from Docker
+      - /run/user/${UID}/podman/podman.sock:/var/run/docker.sock
+    depends_on:
+      bytebase-postgres:
+        condition: service_healthy
+      informix-test:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["--data", "/var/opt/bytebase", "--port", "8080", "--external-url", "http://localhost:8080", "--disable-sample"]
+
+networks:
+  bytebase-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  bytebase_data:
