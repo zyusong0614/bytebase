@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -217,8 +218,8 @@ func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string
 
 // executeInformixQuery executes real SQL against Informix using docker exec
 func (d *Driver) executeInformixQuery(ctx context.Context, statement string) ([]*v1pb.QueryRow, []string, error) {
-	// Use docker exec to run the query in the Informix container
-	// This works because we now have Docker CLI and socket access
+	// Use podman exec to run the query in the Informix container
+	// Since we're running in a Podman environment, use podman instead of docker
 	
 	// Use a safer approach to handle SQL statements with quotes
 	// We'll write the SQL to a temporary string and use base64 encoding to avoid quote issues
@@ -226,6 +227,7 @@ func (d *Driver) executeInformixQuery(ctx context.Context, statement string) ([]
 	// Use heredoc approach to safely pass SQL statements with any quotes
 	cleanSQL := strings.TrimSpace(statement)
 	
+	// Use docker command (which is mapped to podman in container)
 	// Use heredoc syntax to avoid quote escaping issues entirely
 	cmd := fmt.Sprintf(`docker exec informix-test bash -c 'export INFORMIXDIR=/opt/ibm/informix && export INFORMIXSERVER=informix && cat <<EOF | /opt/ibm/informix/bin/dbaccess order
 %s
@@ -250,6 +252,11 @@ func (d *Driver) execCommand(ctx context.Context, cmdStr string) (string, error)
 	
 	// Split the command properly
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	// Set environment variables for docker to use podman socket
+	cmd.Env = append(os.Environ(),
+		"DOCKER_HOST=unix:///run/podman/podman.sock",
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("command failed: %v, output: %s", err, string(output))
