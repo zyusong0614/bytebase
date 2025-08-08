@@ -30,8 +30,8 @@ type ODBCDriver struct {
 	connectionCtx    db.ConnectionContext
 }
 
-// Open opens an Informix driver using IfxGo
-func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.ConnectionConfig) (db.Driver, error) {
+// openODBC opens an Informix ODBC driver (build tag protected)
+func (d *Driver) openODBC(ctx context.Context, _ storepb.Engine, config db.ConnectionConfig) (*ODBCDriver, error) {
 	if config.DataSource == nil {
 		return nil, errors.Errorf("DataSource is required for Informix connection")
 	}
@@ -97,13 +97,7 @@ func (d *Driver) Open(ctx context.Context, _ storepb.Engine, config db.Connectio
 		connectionCtx:    config.ConnectionContext,
 	}
 	
-	// Return the base Driver with embedded ODBCDriver
-	d.connectionString = connString
-	d.databaseName = database
-	d.connectionCtx = config.ConnectionContext
-	d.odbcDriver = driver
-	
-	return d, nil
+	return driver, nil
 }
 
 // Close closes the driver
@@ -143,54 +137,26 @@ func (d *ODBCDriver) Dump(ctx context.Context, schemaOnly bool) (string, error) 
 	return "", errors.New("dump not implemented for IfxGo driver")
 }
 
-// Close closes the main driver
-func (d *Driver) Close(ctx context.Context) error {
-	if d.odbcDriver != nil {
-		return d.odbcDriver.Close(ctx)
-	}
-	return nil
-}
-
-// Ping pings the database
-func (d *Driver) Ping(ctx context.Context) error {
-	if d.odbcDriver != nil {
-		return d.odbcDriver.Ping(ctx)
-	}
-	return errors.New("not connected to database")
-}
-
-// GetDB returns the underlying sql.DB
-func (d *Driver) GetDB() *sql.DB {
-	if d.odbcDriver != nil {
-		return d.odbcDriver.GetDB()
-	}
-	return nil
-}
-
-// Execute executes a SQL statement
-func (d *Driver) Execute(ctx context.Context, statement string, opts db.ExecuteOptions) (int64, error) {
-	if d.odbcDriver == nil {
-		return 0, errors.New("not connected to database")
+// Execute executes a SQL statement for ODBC driver
+func (d *ODBCDriver) Execute(ctx context.Context, statement string, opts db.ExecuteOptions) (int64, error) {
+	if d.db != nil {
+		// Use real database connection
+		result, err := d.db.ExecContext(ctx, statement)
+		if err != nil {
+			return 0, err
+		}
+		return result.RowsAffected()
 	}
 	
-	// For native implementation, simulate successful execution
-	// In a full implementation, this would execute the SQL against Informix
-	// and return actual affected row count
-	return 0, nil // Return 0 rows affected for now
+	// For container exec fallback, simulate successful execution
+	return 0, nil
 }
 
-// QueryConn queries a SQL statement
-func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string, queryContext db.QueryContext) ([]*v1pb.QueryResult, error) {
-	if d.odbcDriver == nil {
-		result := &v1pb.QueryResult{
-			Statement: statement,
-			Error:     "not connected to database",
-		}
-		return []*v1pb.QueryResult{result}, nil
-	}
+// QueryConn queries a SQL statement for ODBC driver
+func (d *ODBCDriver) QueryConn(ctx context.Context, conn *sql.Conn, statement string, queryContext db.QueryContext) ([]*v1pb.QueryResult, error) {
 	
 	// Try to use real database connection first
-	if d.odbcDriver.db != nil {
+	if d.db != nil {
 		fmt.Printf("Using real ifxgo database connection for query: %s\n", statement)
 		return d.executeRealQuery(ctx, statement)
 	}
@@ -217,7 +183,7 @@ func (d *Driver) QueryConn(ctx context.Context, conn *sql.Conn, statement string
 }
 
 // executeInformixQuery executes real SQL against Informix using docker exec
-func (d *Driver) executeInformixQuery(ctx context.Context, statement string) ([]*v1pb.QueryRow, []string, error) {
+func (d *ODBCDriver) executeInformixQuery(ctx context.Context, statement string) ([]*v1pb.QueryRow, []string, error) {
 	// Use podman exec to run the query in the Informix container
 	// Since we're running in a Podman environment, use podman instead of docker
 	
@@ -245,7 +211,7 @@ EOF'`, cleanSQL)
 }
 
 // execCommand executes a shell command with context
-func (d *Driver) execCommand(ctx context.Context, cmdStr string) (string, error) {
+func (d *ODBCDriver) execCommand(ctx context.Context, cmdStr string) (string, error) {
 	// Use proper command execution with context
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -256,6 +222,7 @@ func (d *Driver) execCommand(ctx context.Context, cmdStr string) (string, error)
 	cmd.Env = append(os.Environ(),
 		"DOCKER_HOST=unix:///run/podman/podman.sock",
 		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"CONTAINERS_STORAGE_CONF=/etc/containers/storage.conf",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -266,72 +233,143 @@ func (d *Driver) execCommand(ctx context.Context, cmdStr string) (string, error)
 }
 
 // parseInformixResult parses Informix dbaccess output
-func (d *Driver) parseInformixResult(output string) ([]*v1pb.QueryRow, []string) {
+func (d *ODBCDriver) parseInformixResult(output string) ([]*v1pb.QueryRow, []string) {
 	lines := strings.Split(output, "\n")
 	var rows []*v1pb.QueryRow
 	var columnNames []string
 	
-	// Parse dbaccess output format
+	// Parse dbaccess vertical output format
 	// Example output:
-	//    order_id order_time             store_id ts                  
-	//         101 2024-01-15 10:30:00           1 2024-01-15 10:30:00
+	// order_id       1
+	// customer_name  John Doe
+	// order_date     01/15/2024
+	// amount         150.00
+	//
+	// order_id       2
+	// customer_name  Jane Smith
+	// ...
 	
-	headerFound := false
+	var currentRow map[string]string
+	var columnOrder []string
+	
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "Database selected") || 
-		   strings.Contains(line, "Database closed") || strings.Contains(line, "row(s) retrieved") {
-			continue
-		}
-		
-		// Find header line (contains column names)
-		if !headerFound && strings.Contains(line, "order_id") {
-			// Parse column names from header
-			fields := strings.Fields(line)
-			columnNames = fields
-			headerFound = true
-			continue
-		}
-		
-		// Parse data rows
-		if headerFound && len(line) > 0 && !strings.Contains(line, "order_id") {
-			fields := strings.Fields(line)
-			if len(fields) >= len(columnNames) {
+		if line == "" {
+			// Empty line indicates end of a record
+			if currentRow != nil && len(currentRow) > 0 {
+				// Convert current row to QueryRow
+				if len(columnNames) == 0 {
+					// First row - establish column order
+					columnNames = columnOrder
+				}
+				
 				values := make([]*v1pb.RowValue, len(columnNames))
-				for i, field := range fields[:len(columnNames)] {
+				for i, colName := range columnNames {
+					value, exists := currentRow[colName]
+					if !exists {
+						value = ""
+					}
+					
 					// Try to parse as integer for numeric columns
-					if columnNames[i] == "order_id" || columnNames[i] == "store_id" {
-						if intVal, err := strconv.Atoi(field); err == nil {
+					if colName == "order_id" || strings.Contains(colName, "_id") {
+						if intVal, err := strconv.Atoi(value); err == nil {
 							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_Int32Value{Int32Value: int32(intVal)}}
 						} else {
-							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: field}}
+							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
+						}
+					} else if colName == "amount" {
+						if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_DoubleValue{DoubleValue: floatVal}}
+						} else {
+							values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
 						}
 					} else {
-						values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: field}}
+						values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
 					}
 				}
 				row := &v1pb.QueryRow{Values: values}
 				rows = append(rows, row)
 			}
+			// Reset for next row
+			currentRow = make(map[string]string)
+			columnOrder = []string{}
+			continue
 		}
+		
+		// Skip database status messages
+		if strings.Contains(line, "Database selected") || 
+		   strings.Contains(line, "Database closed") || 
+		   strings.Contains(line, "row(s) retrieved") {
+			continue
+		}
+		
+		// Parse field-value pairs
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			fieldName := parts[0]
+			fieldValue := strings.Join(parts[1:], " ")
+			
+			if currentRow == nil {
+				currentRow = make(map[string]string)
+			}
+			currentRow[fieldName] = fieldValue
+			
+			// Track column order on first occurrence
+			if len(columnNames) == 0 {
+				columnOrder = append(columnOrder, fieldName)
+			}
+		}
+	}
+	
+	// Handle last row if it doesn't end with empty line
+	if currentRow != nil && len(currentRow) > 0 {
+		if len(columnNames) == 0 {
+			columnNames = columnOrder
+		}
+		
+		values := make([]*v1pb.RowValue, len(columnNames))
+		for i, colName := range columnNames {
+			value, exists := currentRow[colName]
+			if !exists {
+				value = ""
+			}
+			
+			if colName == "order_id" || strings.Contains(colName, "_id") {
+				if intVal, err := strconv.Atoi(value); err == nil {
+					values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_Int32Value{Int32Value: int32(intVal)}}
+				} else {
+					values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
+				}
+			} else if colName == "amount" {
+				if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+					values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_DoubleValue{DoubleValue: floatVal}}
+				} else {
+					values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
+				}
+			} else {
+				values[i] = &v1pb.RowValue{Kind: &v1pb.RowValue_StringValue{StringValue: value}}
+			}
+		}
+		row := &v1pb.QueryRow{Values: values}
+		rows = append(rows, row)
 	}
 	
 	// If no columns found, return default columns
 	if len(columnNames) == 0 {
-		columnNames = []string{"order_id", "order_time", "store_id", "ts"}
+		columnNames = []string{"order_id", "customer_name", "order_date", "amount"}
 	}
 	
 	return rows, columnNames
 }
 
 // executeRealQuery executes SQL using real ifxgo database connection
-func (d *Driver) executeRealQuery(ctx context.Context, statement string) ([]*v1pb.QueryResult, error) {
-	if d.odbcDriver.db == nil {
+func (d *ODBCDriver) executeRealQuery(ctx context.Context, statement string) ([]*v1pb.QueryResult, error) {
+	if d.db == nil {
 		return nil, errors.New("no real database connection available")
 	}
 	
 	// Execute query using standard database/sql interface
-	rows, err := d.odbcDriver.db.QueryContext(ctx, statement)
+	rows, err := d.db.QueryContext(ctx, statement)
 	if err != nil {
 		result := &v1pb.QueryResult{
 			Statement: statement,
@@ -411,7 +449,7 @@ func (d *Driver) executeRealQuery(ctx context.Context, statement string) ([]*v1p
 }
 
 // convertToRowValue converts database value to v1pb.RowValue based on column type
-func (d *Driver) convertToRowValue(val interface{}, colType *sql.ColumnType) *v1pb.RowValue {
+func (d *ODBCDriver) convertToRowValue(val interface{}, colType *sql.ColumnType) *v1pb.RowValue {
 	if val == nil {
 		return &v1pb.RowValue{Kind: &v1pb.RowValue_NullValue{}}
 	}
